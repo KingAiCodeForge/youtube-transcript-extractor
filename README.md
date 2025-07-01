@@ -55,7 +55,9 @@ pip install -r requirements.txt
 ## Running the Application
 After installing the dependencies, you can run the application using the following command:
 ```bash
-python src/youtubescraper.py
+py youtubescraper.py
+or
+python youtubescraper.py
 ```
 
 ## Usage
