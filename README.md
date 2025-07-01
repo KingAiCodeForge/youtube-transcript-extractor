@@ -3,11 +3,16 @@
 ## Overview
 The YouTube Transcript Extractor is a Python application that allows users to fetch transcripts from YouTube videos using the YouTube Transcript API. The application features a user-friendly interface built with PySide6, enabling users to easily input video links and retrieve transcripts.
 
+## 📷 Application Screenshot
+
+This is the working YouTube Transcript Extractor in action:
+
+![YouTube Transcript Extractor UI](https://github.com/KingAiCodeForge/youtube-transcript-extractor/blob/main/screenshot-app-ui.png?raw=true)
+
 ## Project Structure
 ```
 youtube-transcript-extractor
-├── src
-│   └── youtubescraper.py  # Main application code
+├── youtubescraper.py       # Main application code
 ├── requirements.txt        # List of dependencies
 ├── install.sh              # Cross-platform installation script
 ├── install.bat             # Windows installation script
