@@ -12,12 +12,34 @@ This is the working YouTube Transcript Extractor in action:
 ## Project Structure
 ```
 youtube-transcript-extractor
-├── youtubescraper.py       # Main application code
-├── requirements.txt        # List of dependencies
-├── install.sh              # Cross-platform installation script
-├── install.bat             # Windows installation script
-└── README.md               # Project documentation
+├── youtubescraper.py                               # Main GUI application (PySide6)
+├── youtubevideosthatdonthaveccextractortranscript.py  # Video metadata extractor (for videos without transcripts)
+├── requirements.txt                                # List of dependencies
+├── install.sh                                      # Cross-platform installation script
+├── install.bat                                     # Windows installation script
+└── README.md                                       # Project documentation
 ```
+
+## Features
+
+### 1. **YouTube Transcript Extractor** (`youtubescraper.py`)
+- Extract transcripts from YouTube videos with captions/subtitles
+- User-friendly PySide6 GUI interface
+- Support for multiple languages
+- Export transcripts to text files
+- Batch processing of multiple videos
+
+### 2. **Video Metadata Extractor** (`youtubevideosthatdonthaveccextractortranscript.py`)
+- **NEW!** Extract video information for videos WITHOUT transcripts
+- Uses `yt-dlp` to fetch video metadata
+- Extracts:
+  - Video title, description, duration
+  - Channel information
+  - View count, like count, upload date
+  - Tags and categories
+  - Comments (top comments)
+- Saves to JSON and formatted text files
+- Perfect for videos that don't have auto-generated captions
 
 ## Prerequisites
 - Python 3.6 or higher
@@ -71,3 +93,15 @@ This project is licensed under the MIT License. See the LICENSE file for more de
 ## Acknowledgments
 - [YouTube Transcript API](https://github.com/jdepoix/youtube-transcript-api) for providing the transcript fetching functionality.
 - [PySide6](https://pyside.org/) for the GUI framework.
+
+## Future Enhancements
+
+### AI/ML-Powered Features (Planned)
+- **Smart Summary Generation**: Implement AI models to automatically generate concise summaries of video transcripts
+- **Content Categorization**: Use ML algorithms to categorize videos based on transcript content
+- **Key Points Extraction**: Develop NLP capabilities to identify and highlight important information
+- **Sentiment Analysis**: Analyze the tone and sentiment of video content
+- **Multi-language Support**: Add automatic translation and transcription for non-English videos
+- **Recommendation Engine**: Build an intelligent system to suggest related videos based on content similarity
+- **Topic Modeling**: Implement unsupervised learning to discover hidden topics within transcripts
+- **Custom Knowledge Base**: Create searchable indexes of transcripts with semantic search capabilities

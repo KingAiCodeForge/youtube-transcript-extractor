@@ -1,2 +1,21 @@
-PySide6
-youtube-transcript-api
+# YouTube Transcript Extractor Dependencies
+
+# Core GUI Framework
+PySide6>=6.5.0
+
+# YouTube Integration
+youtube-transcript-api>=0.6.1
+yt-dlp>=2023.7.6
+
+# Speech Recognition
+SpeechRecognition>=3.10.0
+pydub>=0.25.1
+
+# Optional: Local Whisper Model (uncomment if needed)
+# openai-whisper>=20230918
+
+# Audio Processing
+ffmpeg-python>=0.2.0
+
+# Utilities
+requests>=2.31.0
