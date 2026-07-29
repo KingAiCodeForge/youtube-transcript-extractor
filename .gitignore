@@ -23,9 +23,10 @@ ENV/
 Thumbs.db
 desktop.ini
 
-# Tests (local only)
-test_*.py
-tests/
+# Test and coverage outputs
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Outputs
 output/

@@ -1,107 +1,80 @@
 # YouTube Transcript Extractor
 
-## Overview
-The YouTube Transcript Extractor is a Python application that allows users to fetch transcripts from YouTube videos using the YouTube Transcript API. The application features a user-friendly interface built with PySide6, enabling users to easily input video links and retrieve transcripts.
+Export one or many YouTube transcripts through either an installable command-line interface or a PySide6 desktop application.
 
-## 📷 Application Screenshot
+The CLI is designed for scripts and LLM agents: deterministic JSON, Markdown or text; stable exit codes; JSON errors on stderr; no GUI imports; and no runtime package installation.
 
-This is the working YouTube Transcript Extractor in action:
+## Command-line installation
 
-![YouTube Transcript Extractor UI](https://github.com/KingAiCodeForge/youtube-transcript-extractor/blob/main/screenshot-app-ui.png?raw=true)
+Python 3.9 or newer is required.
 
-## Project Structure
-```
-youtube-transcript-extractor
-├── youtubescraper.py                               # Main GUI application (PySide6)
-├── youtubevideosthatdonthaveccextractortranscript.py  # Video metadata extractor (for videos without transcripts)
-├── requirements.txt                                # List of dependencies
-├── install.sh                                      # Cross-platform installation script
-├── install.bat                                     # Windows installation script
-└── README.md                                       # Project documentation
-```
-
-## Features
-
-### 1. **YouTube Transcript Extractor** (`youtubescraper.py`)
-- Extract transcripts from YouTube videos with captions/subtitles
-- User-friendly PySide6 GUI interface
-- Support for multiple languages
-- Export transcripts to text files
-- Batch processing of multiple videos
-
-### 2. **Video Metadata Extractor** (`youtubevideosthatdonthaveccextractortranscript.py`)
-- **NEW!** Extract video information for videos WITHOUT transcripts
-- Uses `yt-dlp` to fetch video metadata
-- Extracts:
-  - Video title, description, duration
-  - Channel information
-  - View count, like count, upload date
-  - Tags and categories
-  - Comments (top comments)
-- Saves to JSON and formatted text files
-- Perfect for videos that don't have auto-generated captions
-
-## Prerequisites
-- Python 3.6 or higher
-- pip (Python package installer)
-
-## Installation Instructions
-
-### Clone the Repository
-First, clone the repository to your local machine using the following command:
 ```bash
-git clone https://github.com/yourusername/youtube-transcript-extractor.git
+git clone https://github.com/KingAiCodeForge/youtube-transcript-extractor.git
 cd youtube-transcript-extractor
+python -m pip install -e .
 ```
 
-### Install Dependencies
-You can install the required dependencies using one of the following methods:
+## Command-line usage
 
-#### Method 1: Using `install.sh` (Cross-platform)
-1. Open a terminal.
-2. Navigate to the project directory.
-3. Run the installation script:
-   ```bash
-   bash install.sh
-   ```
-
-#### Method 2: Using `install.bat` (Windows)
-1. Right-click on `install.bat` and select "Run as administrator" or double-click it to execute the script. This will ensure that pip is up-to-date and install the necessary dependencies.
-
-### Manual Installation
-Alternatively, you can manually install the dependencies by running:
 ```bash
-pip install -r requirements.txt
+youtube-transcript \
+  "https://www.youtube.com/watch?v=VIDEO_ID" \
+  --format json \
+  --stdout
 ```
 
-## Running the Application
-After installing the dependencies, you can run the application using the following command:
+Convert several videos to individual Markdown files:
+
 ```bash
-py youtubescraper.py
-or
-python youtubescraper.py
+youtube-transcript URL_1 URL_2 URL_3 \
+  --format markdown \
+  --output-dir ./output
 ```
 
-## Usage
-1. Paste YouTube video links into the input area.
-2. Click on "Extract Transcripts" to fetch the transcripts.
-3. Once the transcripts are fetched, you can save them as a Markdown file.
+Existing files are never replaced unless `--overwrite` is supplied.
+
+Supported input forms include video IDs and `watch`, `youtu.be`, `shorts`, `live`, and `embed` URLs. Repeat `--language CODE` to set caption-language preference order.
+
+```bash
+youtube-transcript --help
+youtube-transcript --version
+```
+
+See [LLM_USAGE.md](LLM_USAGE.md) for the JSON contract and exit codes.
+
+## Desktop application
+
+```bash
+python -m pip install -e ".[gui]"
+python youtube_transcript_extractor_fixed.py
+```
+
+Legacy tools remain available:
+
+- `youtube_transcript_extractor_fixed.py`: current PySide6 transcript GUI.
+- `youtubescraper.py`: original GUI application.
+- `youtubevideosthatdonthaveccextractortranscript.py`: metadata/fallback utility.
+
+## Development
+
+The test suite is offline; it injects a fake transcript API and never contacts YouTube.
+
+```bash
+python -m pip install -e ".[test]"
+pytest tests
+```
+
+## Evidence and privacy
+
+Generated transcripts belong in `output/` or `exports/`, which are ignored by Git. Do not commit private downloads or research corpora.
+
+A transcript is evidence of what captions contain, not proof that a technical claim is correct. Automatic captions can misrecognize product numbers, voltages, frequencies, and units.
 
 ## License
-This project is licensed under the MIT License. See the LICENSE file for more details.
 
-## Acknowledgments
-- [YouTube Transcript API](https://github.com/jdepoix/youtube-transcript-api) for providing the transcript fetching functionality.
-- [PySide6](https://pyside.org/) for the GUI framework.
+The project is described as MIT-licensed, but the repository does not yet contain a root `LICENSE` file. Treat licensing as unresolved until the copyright holder adds one.
 
-## Future Enhancements
+## Credits
 
-### AI/ML-Powered Features (Planned)
-- **Smart Summary Generation**: Implement AI models to automatically generate concise summaries of video transcripts
-- **Content Categorization**: Use ML algorithms to categorize videos based on transcript content
-- **Key Points Extraction**: Develop NLP capabilities to identify and highlight important information
-- **Sentiment Analysis**: Analyze the tone and sentiment of video content
-- **Multi-language Support**: Add automatic translation and transcription for non-English videos
-- **Recommendation Engine**: Build an intelligent system to suggest related videos based on content similarity
-- **Topic Modeling**: Implement unsupervised learning to discover hidden topics within transcripts
-- **Custom Knowledge Base**: Create searchable indexes of transcripts with semantic search capabilities
+- [youtube-transcript-api](https://github.com/jdepoix/youtube-transcript-api)
+- [PySide6](https://doc.qt.io/qtforpython-6/)
