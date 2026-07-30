@@ -25,6 +25,8 @@ desktop.ini
 
 # Test and coverage outputs
 .pytest_cache/
+.pytest_tmp/
+.benchmarks/
 .coverage
 htmlcov/
 

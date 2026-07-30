@@ -19,13 +19,15 @@ gui = [
   "ffmpeg-python>=0.2.0",
   "requests>=2.31.0",
 ]
+local-media = ["faster-whisper>=1.0.0"]
 test = ["flake8>=7", "pytest>=8"]
 
 [project.scripts]
 youtube-transcript = "youtube_transcript_cli:main"
+local-media-transcribe = "local_media_transcribe:main"
 
 [tool.setuptools]
-py-modules = ["youtube_transcript_cli"]
+py-modules = ["youtube_transcript_cli", "local_media_transcribe"]
 
 [tool.setuptools.dynamic]
 version = {attr = "youtube_transcript_cli.__version__"}
