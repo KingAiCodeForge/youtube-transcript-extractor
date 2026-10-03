@@ -34,3 +34,11 @@ htmlcov/
 output/
 exports/
 *.log
+
+# Local pytest captures, research outputs and runtime secrets
+/.pytest-local-temp/
+/_ai_work/
+/local/
+.env
+.env.*
+!.env.example
