@@ -19,7 +19,7 @@ gui = [
   "ffmpeg-python>=0.2.0",
   "requests>=2.31.0",
 ]
-local-media = ["faster-whisper>=1.0.0"]
+local-media = ["faster-whisper>=1.2.1"]
 test = ["flake8>=7", "pytest>=8"]
 
 [project.scripts]
