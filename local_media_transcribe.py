@@ -103,6 +103,38 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def load_hotwords(
+    inline: Sequence[str] | None, hotwords_file: Path | None
+) -> list[str]:
+    """Load ordered, de-duplicated ASR hint phrases.
+
+    Files use one term/phrase per line; blank lines and lines beginning with '#'
+    are ignored.  The exact resulting list is stored in transcript provenance.
+    """
+    values: list[str] = []
+    values.extend(inline or [])
+    if hotwords_file is not None:
+        text = hotwords_file.read_text(encoding="utf-8-sig")
+        values.extend(
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        value = value.strip()
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(value)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # audio extraction
 # --------------------------------------------------------------------------- #
@@ -185,17 +217,23 @@ def transcribe_media(
     vad_filter: bool,
     ffmpeg: str,
     requested_input: str,
+    hotwords: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Transcribe one media file into the stable transcript document schema."""
     faster_whisper_version = _dependency_version("faster_whisper")
     with tempfile.TemporaryDirectory(prefix="lmt_") as tmp:
         wav_path = Path(tmp) / "audio.wav"
         extract_audio(media, wav_path, ffmpeg)
+        transcribe_kwargs: dict[str, Any] = {
+            "language": language,
+            "beam_size": beam_size,
+            "vad_filter": vad_filter,
+        }
+        if hotwords:
+            transcribe_kwargs["hotwords"] = ", ".join(hotwords)
         segments_iter, info = model.transcribe(
             str(wav_path),
-            language=language,
-            beam_size=beam_size,
-            vad_filter=vad_filter,
+            **transcribe_kwargs,
         )
         segments = [
             {
@@ -227,6 +265,7 @@ def transcribe_media(
             "compute_type": compute_type,
             "beam_size": beam_size,
             "vad_filter": vad_filter,
+            "hotwords": list(hotwords),
         },
         "transcript": {
             "language": language_code,
@@ -363,6 +402,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beam-size", type=int, default=5, help="beam size (default: 5)")
     parser.add_argument("--vad-filter", action="store_true",
                         help="apply voice-activity detection to drop silence")
+    parser.add_argument(
+        "--hotword",
+        action="append",
+        dest="hotwords",
+        metavar="TERM",
+        help="bias recognition toward a technical term/phrase; repeatable",
+    )
+    parser.add_argument(
+        "--hotwords-file",
+        type=Path,
+        help="UTF-8 file with one hotword/hint phrase per line",
+    )
     parser.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg executable (default: ffmpeg)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -376,6 +427,15 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
 
     if args.output_dir is None and not args.to_stdout:
         print("error: at least one output destination is required: --output-dir or --stdout", file=stderr)
+        return EXIT_USAGE
+
+    try:
+        hotwords = load_hotwords(args.hotwords, args.hotwords_file)
+    except (OSError, UnicodeError) as exc:
+        print(
+            f"error: could not read hotwords file: {type(exc).__name__}: {exc}",
+            file=stderr,
+        )
         return EXIT_USAGE
 
     if shutil.which(args.ffmpeg) is None and not Path(args.ffmpeg).is_file():
@@ -423,6 +483,7 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
                 language=args.language,
                 beam_size=args.beam_size, vad_filter=args.vad_filter,
                 ffmpeg=args.ffmpeg, requested_input=str(media),
+                hotwords=hotwords,
             )
         except Exception as exc:  # keep going through the batch
             print(f"  failed: {type(exc).__name__}: {exc}", file=stderr)
