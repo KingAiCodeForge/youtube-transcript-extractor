@@ -130,7 +130,20 @@ def _pick_compute_type(device: str, requested: str) -> str:
 def _resolve_device(requested: str) -> str:
     if requested != "auto":
         return requested
-    try:  # prefer GPU when torch reports CUDA, else CPU
+
+    # faster-whisper executes through CTranslate2, not PyTorch.  Prefer the
+    # runtime that will actually load the model when asking whether CUDA is
+    # usable.  Keep the torch probe only as a compatibility fallback for
+    # environments where CTranslate2 is not importable yet.
+    try:
+        import ctranslate2  # type: ignore
+
+        if int(ctranslate2.get_cuda_device_count()) > 0:
+            return "cuda"
+    except Exception:
+        pass
+
+    try:
         import torch  # type: ignore
 
         return "cuda" if torch.cuda.is_available() else "cpu"
@@ -138,7 +151,10 @@ def _resolve_device(requested: str) -> str:
         return "cpu"
 
 
-def load_model(model_name: str, device: str, compute_type: str) -> Any:
+def load_model(
+    model_name: str, device: str, compute_type: str
+) -> tuple[Any, str, str]:
+    """Load a Whisper model and report the runtime that actually succeeded."""
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -146,10 +162,14 @@ def load_model(model_name: str, device: str, compute_type: str) -> Any:
             "faster-whisper is not installed. Run: pip install faster-whisper"
         ) from exc
     try:
-        return WhisperModel(model_name, device=device, compute_type=compute_type)
+        model = WhisperModel(
+            model_name, device=device, compute_type=compute_type
+        )
+        return model, device, compute_type
     except Exception:
         if device == "cuda":  # graceful CPU fallback (missing cuDNN/cuBLAS etc.)
-            return WhisperModel(model_name, device="cpu", compute_type="int8")
+            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            return model, "cpu", "int8"
         raise
 
 
@@ -367,22 +387,40 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
         print("error: no supported media files matched the given inputs", file=stderr)
         return EXIT_USAGE
 
-    device = _resolve_device(args.device)
-    compute_type = _pick_compute_type(device, args.compute_type)
+    requested_device = _resolve_device(args.device)
+    requested_compute_type = _pick_compute_type(
+        requested_device, args.compute_type
+    )
     try:
-        model = load_model(args.model, device, compute_type)
+        loaded = load_model(
+            args.model, requested_device, requested_compute_type
+        )
     except ModuleNotFoundError as exc:
         print(f"error: {exc}", file=stderr)
         return EXIT_DEPENDENCY
 
+    # The tuple is the current contract.  Accept a bare model as a compatibility
+    # path for injected test doubles and older external callers.
+    if isinstance(loaded, tuple) and len(loaded) == 3:
+        model, runtime_device, runtime_compute_type = loaded
+    else:
+        model = loaded
+        runtime_device = requested_device
+        runtime_compute_type = requested_compute_type
+
     documents: list[dict[str, Any]] = []
     exit_code = EXIT_OK
     for media in media_files:
-        print(f"transcribing {media.name} ({args.model}/{device}) ...", file=stderr)
+        print(
+            f"transcribing {media.name} "
+            f"({args.model}/{runtime_device}/{runtime_compute_type}) ...",
+            file=stderr,
+        )
         try:
             document = transcribe_media(
-                media, model=model, model_name=args.model, device=device,
-                compute_type=compute_type, language=args.language,
+                media, model=model, model_name=args.model,
+                device=runtime_device, compute_type=runtime_compute_type,
+                language=args.language,
                 beam_size=args.beam_size, vad_filter=args.vad_filter,
                 ffmpeg=args.ffmpeg, requested_input=str(media),
             )
