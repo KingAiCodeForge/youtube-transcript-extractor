@@ -64,7 +64,16 @@ Transcribes local files that have no captions. Requires `faster-whisper` (`pip i
 ```bash
 local-media-transcribe ./recordings --format json --output-dir ./out
 local-media-transcribe call.m4a --stdout --format text
+local-media-transcribe webinar.mp4 \
+  --hotwords-file vocab/ecu_tuning_core.txt \
+  --format json --output-dir ./out
 ```
+
+For technical media, repeat `--hotword TERM` or pass a UTF-8
+`--hotwords-file` with one term/phrase per line. The ordered de-duplicated
+hotword list is recorded in `extraction.hotwords`; downstream agents should
+therefore treat it as decoding provenance, not as independent evidence that the
+hinted term was actually spoken.
 
 At least one destination is required: `--stdout`, `--output-dir`, or both. Inputs may be files, directories (searched recursively) or globs, including absolute globs. Unsupported extensions are ignored and duplicate inputs are transcribed once.
 

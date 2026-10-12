@@ -1,0 +1,57 @@
+# Optional technical vocabulary for automotive ECU/transmission calibration media.
+# Use with:
+#   local-media-transcribe video.mp4 --hotwords-file vocab/ecu_tuning_core.txt ...
+#
+# Hotwords bias ASR decoding; they do not post-correct a transcript. Keep the
+# resulting hotword list in transcript provenance and review technical claims
+# against the source.
+
+WinOLS
+TunerPro
+DAMOS
+A2L
+ASAP2
+Bosch
+Siemens
+Continental
+Delphi
+MED17
+MED17.5
+MED9
+ME7
+Simos
+Tricore
+C167
+PowerPC
+ECU
+TCU
+calibration
+mappack
+map pack
+lambda
+torque
+cylinder filling
+rail pressure
+spark advance
+ignition timing
+component protection
+exhaust gas temperature
+EGT
+KFMIRL
+KFMIOP
+LDRXN
+LDRXNZK
+KFLDHBN
+KFLBTS
+KFFDLBTS
+KFZW
+KFZW2
+KFZWOP
+KFZWOP2
+KFZWMN
+KFTARX
+KFTARXB
+KFTARXZK
+MDNORM
+StageX
+ECM Titanium

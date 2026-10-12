@@ -72,11 +72,23 @@ local-media-transcribe ./recordings --model medium --device cuda --output-dir ou
 
 # quick look on screen
 local-media-transcribe call.m4a --stdout --format text
+
+# bias technical vocabulary without rewriting the transcript afterwards
+local-media-transcribe webinar.mp4 \
+  --model medium --device auto --language en --vad-filter \
+  --hotwords-file vocab/ecu_tuning_core.txt \
+  --format markdown --output-dir out
 ```
 
-Directories are searched recursively and duplicate inputs are transcribed once. `--device auto` selects CUDA when torch reports it and otherwise falls back to CPU, including when a CUDA model fails to load for want of cuDNN or cuBLAS.
+Repeat `--hotword TERM` for ad-hoc vocabulary or use `--hotwords-file` for one
+term/phrase per line. Hotwords are passed into faster-whisper's decoder and the
+resolved list is stored in the transcript's extraction provenance. They are a
+recognition hint, not a factual correction layer; overly broad or incorrect
+hotwords can bias ASR output.
 
-Every document records the source file's SHA-256, the model, device, compute type, beam size and the resolved `faster-whisper` version, so a transcript can be traced back to the exact file and settings that produced it. As with the YouTube path there is no wall-clock field, so re-running an unchanged file produces a byte-identical document.
+Directories are searched recursively and duplicate inputs are transcribed once. `--device auto` asks CTranslate2—the runtime used by `faster-whisper`—whether a CUDA device is available, with a PyTorch probe retained only as a compatibility fallback. If CUDA model loading still fails (for example because required GPU runtime libraries are unavailable), the command retries on CPU.
+
+Every document records the source file's SHA-256, the model, **actual runtime device**, compute type, beam size and the resolved `faster-whisper` version, so a transcript can be traced back to the exact file and settings that produced it. A CUDA-to-CPU fallback is therefore recorded as CPU rather than incorrectly preserving the requested CUDA metadata. As with the YouTube path there is no wall-clock field, so re-running an unchanged file produces a byte-identical document.
 
 A machine transcript of speech is a draft. Whisper misrecognises names, part numbers, callsigns and units, and it can hallucinate text over silence or music. Treat the output as something a person reviews, not as a record.
 
