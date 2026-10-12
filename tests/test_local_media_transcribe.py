@@ -102,6 +102,17 @@ def test_resolve_inputs_returns_empty_for_no_match(tmp_path):
     assert lmt.resolve_inputs([str(tmp_path / "nothing-here")]) == []
 
 
+def test_hotwords_file_deduplicates_and_ignores_comments(tmp_path):
+    vocab = tmp_path / "terms.txt"
+    vocab.write_text(
+        "# technical vocabulary\nWinOLS\nMED17.5\nwinols\n\nKFMIRL\n",
+        encoding="utf-8",
+    )
+    assert lmt.load_hotwords(["Bosch", "MED17.5"], vocab) == [
+        "Bosch", "MED17.5", "WinOLS", "KFMIRL",
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # timestamps
 # --------------------------------------------------------------------------- #
@@ -171,6 +182,21 @@ def test_transcribe_passes_language_and_beam_through(media_file, no_audio_extrac
     assert model.last_kwargs["language"] == "en"
     assert model.last_kwargs["beam_size"] == 3
     assert model.last_kwargs["vad_filter"] is True
+    assert "hotwords" not in model.last_kwargs
+
+
+def test_transcribe_passes_and_records_hotwords(media_file, no_audio_extraction):
+    model = _FakeModel()
+    document = lmt.transcribe_media(
+        media_file, model=model, model_name="small", device="cpu",
+        compute_type="int8", language="en", beam_size=5, vad_filter=True,
+        ffmpeg="ffmpeg", requested_input=str(media_file),
+        hotwords=["WinOLS", "MED17.5", "KFMIRL", "KFMIOP"],
+    )
+    assert model.last_kwargs["hotwords"] == "WinOLS, MED17.5, KFMIRL, KFMIOP"
+    assert document["extraction"]["hotwords"] == [
+        "WinOLS", "MED17.5", "KFMIRL", "KFMIOP",
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -238,6 +264,16 @@ def test_cli_reports_no_matching_media_as_usage(tmp_path, capsys, ffmpeg_on_path
     code = lmt.run_cli([str(tmp_path / "absent.mp4"), "--stdout"])
     assert code == lmt.EXIT_USAGE
     assert "no supported media files" in capsys.readouterr().err
+
+
+def test_cli_reports_missing_hotwords_file_as_usage(tmp_path, capsys):
+    code = lmt.run_cli([
+        "anything.mp4",
+        "--stdout",
+        "--hotwords-file", str(tmp_path / "missing-vocab.txt"),
+    ])
+    assert code == lmt.EXIT_USAGE
+    assert "could not read hotwords file" in capsys.readouterr().err
 
 
 def test_cli_reports_a_missing_engine_as_a_dependency_failure(
