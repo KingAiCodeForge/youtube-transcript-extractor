@@ -301,9 +301,49 @@ def test_explicit_device_is_never_overridden():
     assert lmt._resolve_device("cuda") == "cuda"
 
 
-def test_device_falls_back_to_cpu_without_torch(monkeypatch):
+def test_device_prefers_ctranslate2_cuda_without_torch(monkeypatch):
+    class _FakeCTranslate2:
+        @staticmethod
+        def get_cuda_device_count():
+            return 1
+
+    monkeypatch.setitem(sys.modules, "ctranslate2", _FakeCTranslate2())
+    monkeypatch.setitem(sys.modules, "torch", None)
+    assert lmt._resolve_device("auto") == "cuda"
+
+
+def test_device_falls_back_to_cpu_without_cuda_runtime(monkeypatch):
+    class _FakeCTranslate2:
+        @staticmethod
+        def get_cuda_device_count():
+            return 0
+
+    monkeypatch.setitem(sys.modules, "ctranslate2", _FakeCTranslate2())
     monkeypatch.setitem(sys.modules, "torch", None)
     assert lmt._resolve_device("auto") == "cpu"
+
+
+def test_cli_records_actual_runtime_after_cuda_fallback(
+    tmp_path, media_file, ffmpeg_on_path, no_audio_extraction, monkeypatch
+):
+    monkeypatch.setattr(
+        lmt,
+        "load_model",
+        lambda *a, **k: (_FakeModel(), "cpu", "int8"),
+    )
+    out_dir = tmp_path / "out"
+
+    code = lmt.run_cli([
+        str(media_file),
+        "--output-dir", str(out_dir),
+        "--device", "cuda",
+        "--format", "json",
+    ])
+
+    assert code == lmt.EXIT_OK
+    payload = json.loads((out_dir / "briefing.json").read_text(encoding="utf-8"))
+    assert payload["extraction"]["device"] == "cpu"
+    assert payload["extraction"]["compute_type"] == "int8"
 
 
 def test_compute_type_defaults_per_device():
