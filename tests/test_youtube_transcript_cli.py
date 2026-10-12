@@ -38,6 +38,10 @@ class FakeApi:
     [
         VIDEO_A,
         f"https://www.youtube.com/watch?v={VIDEO_A}",
+        (
+            f"https://m.youtube.com/watch?v={VIDEO_A}&t=3s"
+            "&pp=2AEDkAIB&fbclid=test-share-token"
+        ),
         f"https://youtu.be/{VIDEO_A}",
         f"https://www.youtube.com/shorts/{VIDEO_A}",
         f"https://www.youtube.com/live/{VIDEO_A}?feature=share",
