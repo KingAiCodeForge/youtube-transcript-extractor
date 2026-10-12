@@ -72,7 +72,19 @@ local-media-transcribe ./recordings --model medium --device cuda --output-dir ou
 
 # quick look on screen
 local-media-transcribe call.m4a --stdout --format text
+
+# bias technical vocabulary without rewriting the transcript afterwards
+local-media-transcribe webinar.mp4 \
+  --model medium --device auto --language en --vad-filter \
+  --hotwords-file vocab/ecu_tuning_core.txt \
+  --format markdown --output-dir out
 ```
+
+Repeat `--hotword TERM` for ad-hoc vocabulary or use `--hotwords-file` for one
+term/phrase per line. Hotwords are passed into faster-whisper's decoder and the
+resolved list is stored in the transcript's extraction provenance. They are a
+recognition hint, not a factual correction layer; overly broad or incorrect
+hotwords can bias ASR output.
 
 Directories are searched recursively and duplicate inputs are transcribed once. `--device auto` asks CTranslate2—the runtime used by `faster-whisper`—whether a CUDA device is available, with a PyTorch probe retained only as a compatibility fallback. If CUDA model loading still fails (for example because required GPU runtime libraries are unavailable), the command retries on CPU.
 
