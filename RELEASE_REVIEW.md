@@ -28,8 +28,8 @@ dependency combination. Python 3.9-3.14 remains the CI declaration; only the
 Python/platform versions listed in the release receipt were run locally.
 No hardware controls, private inputs, paid services or package registries used.
 
-Local results on 2026-10-20: Windows Python 3.13.5: 65 offline tests passed,
-critical flake8 checks returned zero; Ubuntu 24.04 WSL Python 3.12.3: 65 offline
+Local results on 2026-10-20: Windows Python 3.13.5: 68 offline tests passed,
+critical flake8 checks returned zero; Ubuntu 24.04 WSL Python 3.12.3: 68 offline
 tests passed. Both clean environments installed the package, ran help/version
 and missing-input/dependency checks from outside the checkout with space/Unicode
 fixture paths. Both installers were invoked from unrelated working directories.

@@ -1,4 +1,4 @@
-include README.md LLM_USAGE.md RELEASE_REVIEW.md install.sh install.bat
+include .gitignore .gitattributes README.md LLM_USAGE.md RELEASE_REVIEW.md install.sh install.bat
 recursive-include tests *.py
 recursive-include vocab *.txt
 prune legacy

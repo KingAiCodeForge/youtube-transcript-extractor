@@ -109,3 +109,31 @@ def test_local_output_failure_is_controlled(tmp_path, monkeypatch):
     assert lmt.run_cli([str(media), "--output-dir", str(tmp_path / "out")], stderr=errors) == lmt.EXIT_RUNTIME
     assert "output failed" in errors.getvalue()
     assert media.read_bytes() == b"source"
+
+
+@pytest.mark.parametrize("module", [lmt, yt])
+def test_explicit_replacement_does_not_truncate_an_aliased_original(module, tmp_path):
+    original = tmp_path / "original archive.txt"
+    original.write_bytes(b"original content")
+    output = tmp_path / "transcript.txt"
+    os.link(original, output)
+    module._write_text(output, "replacement", overwrite=True)
+    assert original.read_bytes() == b"original content"
+    assert output.read_text(encoding="utf-8") == "replacement"
+
+
+def test_local_stdout_failure_is_controlled(tmp_path, monkeypatch):
+    media = tmp_path / "vid.mp4"
+    media.write_bytes(b"source")
+    monkeypatch.setattr(lmt.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(lmt, "load_model", lambda *a: object())
+    monkeypatch.setattr(lmt, "transcribe_media", lambda *a, **k: {})
+    monkeypatch.setattr(lmt, "render_batch", lambda *a: "transcript")
+
+    class BrokenOutput(StringIO):
+        def write(self, text):
+            raise BrokenPipeError("pipe closed")
+
+    errors = StringIO()
+    assert lmt.run_cli([str(media), "--stdout"], stdout=BrokenOutput(), stderr=errors) == lmt.EXIT_RUNTIME
+    assert "stdout failed" in errors.getvalue()
