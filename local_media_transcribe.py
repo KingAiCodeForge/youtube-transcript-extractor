@@ -37,6 +37,7 @@ import argparse
 import glob
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -44,7 +45,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence, TextIO
 
-__version__ = "1.0.0"
+__version__ = "1.1.0rc1"
 GENERATOR_NAME = "youtube-transcript-extractor local-media"
 SCHEMA_VERSION = "1.0"
 
@@ -170,8 +171,7 @@ def _resolve_device(requested: str) -> str:
     try:
         import ctranslate2  # type: ignore
 
-        if int(ctranslate2.get_cuda_device_count()) > 0:
-            return "cuda"
+        return "cuda" if int(ctranslate2.get_cuda_device_count()) > 0 else "cpu"
     except Exception:
         pass
 
@@ -367,10 +367,49 @@ def render_batch(documents: Sequence[dict[str, Any]], output_format: str) -> str
     raise ValueError(f"unsupported output format: {output_format}")
 
 
-def _write_text(path: Path, content: str) -> None:
+def _write_text(path: Path, content: str, *, overwrite: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as output_file:
-        output_file.write(content)
+    if not overwrite:
+        with path.open("x", encoding="utf-8", newline="\n") as output_file:
+            output_file.write(content)
+        return
+    # Replace the directory entry atomically; never truncate through a symlink.
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as output_file:
+            temporary = output_file.name
+            output_file.write(content)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+
+
+def plan_outputs(media_files: Sequence[Path], output_dir: Path,
+                 output_format: str, *, overwrite: bool = False,
+                 protected: Sequence[Path] = ()) -> dict[Path, Path]:
+    """Reject ambiguous or destructive destinations before any transcription."""
+    outputs: dict[Path, Path] = {}
+    seen: set[Path] = set()
+    sources = [*media_files, *protected]
+    for media in media_files:
+        path = output_dir / f"{media.stem}{FORMAT_EXTENSIONS[output_format]}"
+        resolved = path.resolve()
+        if resolved in seen:
+            raise ValueError(f"multiple inputs map to the same output: {path}")
+        seen.add(resolved)
+        for source in sources:
+            if resolved == source.resolve() or (
+                path.exists() and source.exists() and path.samefile(source)
+            ):
+                raise ValueError(f"output aliases an input: {path}")
+        if path.is_dir() or (path.exists() and not overwrite) or path.is_symlink():
+            raise ValueError(f"output exists; choose a new directory or --overwrite: {path}")
+        outputs[media] = path
+    return outputs
 
 
 # --------------------------------------------------------------------------- #
@@ -391,6 +430,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="write one <stem>.<extension> file per input")
     parser.add_argument("--stdout", action="store_true", dest="to_stdout",
                         help="write a single batch document to standard output")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="replace existing transcript files (default: fail safely)")
     parser.add_argument("--model", default="small",
                         help="whisper model: tiny|base|small|medium|large-v3 (default: small)")
     parser.add_argument("--device", default="auto", choices=("auto", "cuda", "cpu"),
@@ -429,6 +470,10 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
         print("error: at least one output destination is required: --output-dir or --stdout", file=stderr)
         return EXIT_USAGE
 
+    if args.beam_size < 1:
+        print("error: --beam-size must be positive", file=stderr)
+        return EXIT_USAGE
+
     try:
         hotwords = load_hotwords(args.hotwords, args.hotwords_file)
     except (OSError, UnicodeError) as exc:
@@ -442,9 +487,23 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
         print(f"error: ffmpeg not found ('{args.ffmpeg}'). Install ffmpeg or pass --ffmpeg PATH.", file=stderr)
         return EXIT_DEPENDENCY
 
-    media_files = resolve_inputs(args.media)
+    try:
+        media_files = resolve_inputs(args.media)
+    except (OSError, ValueError) as exc:
+        print(f"error: could not resolve media inputs: {exc}", file=stderr)
+        return EXIT_USAGE
     if not media_files:
         print("error: no supported media files matched the given inputs", file=stderr)
+        return EXIT_USAGE
+
+    try:
+        outputs = plan_outputs(
+            media_files, args.output_dir.expanduser(), args.format,
+            overwrite=args.overwrite,
+            protected=[args.hotwords_file] if args.hotwords_file else (),
+        ) if args.output_dir is not None else {}
+    except (OSError, ValueError) as exc:
+        print(f"error: unsafe output: {exc}", file=stderr)
         return EXIT_USAGE
 
     requested_device = _resolve_device(args.device)
@@ -458,6 +517,9 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
     except ModuleNotFoundError as exc:
         print(f"error: {exc}", file=stderr)
         return EXIT_DEPENDENCY
+    except Exception as exc:
+        print(f"error: model loading failed: {type(exc).__name__}: {exc}", file=stderr)
+        return EXIT_RUNTIME
 
     # The tuple is the current contract.  Accept a bare model as a compatibility
     # path for injected test doubles and older external callers.
@@ -491,12 +553,22 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
             continue
         documents.append(document)
         if args.output_dir is not None:
-            out_path = args.output_dir / f"{media.stem}{FORMAT_EXTENSIONS[args.format]}"
-            _write_text(out_path, render_document(document, args.format))
+            out_path = outputs[media]
+            try:
+                _write_text(out_path, render_document(document, args.format),
+                            overwrite=args.overwrite)
+            except (OSError, UnicodeError) as exc:
+                print(f"  output failed: {type(exc).__name__}: {exc}", file=stderr)
+                exit_code = EXIT_RUNTIME
+                continue
             print(f"  wrote {out_path} ({document['transcript']['segment_count']} segments)", file=stderr)
 
     if args.to_stdout and documents:
-        stdout.write(render_batch(documents, args.format))
+        try:
+            stdout.write(render_batch(documents, args.format))
+        except (OSError, UnicodeError) as exc:
+            print(f"error: stdout failed: {type(exc).__name__}: {exc}", file=stderr)
+            exit_code = EXIT_RUNTIME
 
     return exit_code
 

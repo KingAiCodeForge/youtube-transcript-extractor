@@ -1,8 +1,10 @@
 # YouTube Transcript Extractor
 
-Export one or many transcripts through installable command-line interfaces or a PySide6 desktop application.
+Export one or many transcripts through installable command-line interfaces.
+Version 1.1.0rc1 qualifies offline CLI safety and packaging; live YouTube service
+availability, ASR accuracy and GPU execution have not been qualified for this release.
 
-The project ships two complementary CLIs that emit the **same transcript schema**, so their output drops into one comparison or diff workflow:
+The project ships two complementary CLIs with shared transcript segment fields:
 
 | Command | Source | Engine |
 | --- | --- | --- |
@@ -18,7 +20,7 @@ Python 3.9 or newer is required.
 ```bash
 git clone https://github.com/KingAiCodeForge/youtube-transcript-extractor.git
 cd youtube-transcript-extractor
-python -m pip install -e .
+python -m pip install .
 ```
 
 ## Command-line usage
@@ -38,7 +40,9 @@ youtube-transcript URL_1 URL_2 URL_3 \
   --output-dir ./output
 ```
 
-Existing files are never replaced unless `--overwrite` is supplied.
+Both commands preserve existing output files unless `--overwrite` is supplied.
+Local-media batches reject colliding output names and output/input aliases before
+loading a model. Give same-stem media separate output directories.
 
 Supported input forms include video IDs and `watch`, `youtu.be`, `shorts`, `live`, and `embed` URLs. Repeat `--language CODE` to set caption-language preference order.
 
@@ -88,22 +92,19 @@ hotwords can bias ASR output.
 
 Directories are searched recursively and duplicate inputs are transcribed once. `--device auto` asks CTranslate2—the runtime used by `faster-whisper`—whether a CUDA device is available, with a PyTorch probe retained only as a compatibility fallback. If CUDA model loading still fails (for example because required GPU runtime libraries are unavailable), the command retries on CPU.
 
-Every document records the source file's SHA-256, the model, **actual runtime device**, compute type, beam size and the resolved `faster-whisper` version, so a transcript can be traced back to the exact file and settings that produced it. A CUDA-to-CPU fallback is therefore recorded as CPU rather than incorrectly preserving the requested CUDA metadata. As with the YouTube path there is no wall-clock field, so re-running an unchanged file produces a byte-identical document.
+Every document records the source file's SHA-256, the model, **actual runtime device**, compute type, beam size and the resolved `faster-whisper` version. A CUDA-to-CPU fallback is recorded as CPU. There is no wall-clock field: rendering identical segment data and provenance is byte-stable. ASR output may still vary by model, runtime and hardware; identical input bytes do not guarantee identical recognized text. Local-media JSON batches are arrays; YouTube JSON batches use a `videos` envelope.
 
 A machine transcript of speech is a draft. Whisper misrecognises names, part numbers, callsigns and units, and it can hallucinate text over silence or music. Treat the output as something a person reviews, not as a record.
 
-## Desktop application
+## Preserved prototypes
 
-```bash
-python -m pip install -e ".[gui]"
-python youtube_transcript_extractor_fixed.py
-```
-
-Legacy tools remain available:
-
-- `youtube_transcript_extractor_fixed.py`: current PySide6 transcript GUI.
-- `youtubescraper.py`: original GUI application.
-- `youtubevideosthatdonthaveccextractortranscript.py`: metadata/fallback utility.
+The original GUI and multi-engine experiments are preserved unchanged under
+[`legacy/source-9307531/`](legacy/source-9307531/), with exact source blobs and
+limitations in [`legacy/MANIFEST.md`](legacy/MANIFEST.md). They can install
+dependencies at import time and contact external speech services. They are
+unsupported, were not executed, and are excluded from wheel/sdist artifacts.
+The historical `src` gitlink has no configured submodule URL; it is recorded
+without fetching unknown content. See [RELEASE_REVIEW.md](RELEASE_REVIEW.md).
 
 ## Development
 
