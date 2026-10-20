@@ -37,6 +37,7 @@ import argparse
 import glob
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -44,7 +45,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence, TextIO
 
-__version__ = "1.0.0"
+__version__ = "1.1.0rc1"
 GENERATOR_NAME = "youtube-transcript-extractor local-media"
 SCHEMA_VERSION = "1.0"
 
@@ -103,6 +104,38 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def load_hotwords(
+    inline: Sequence[str] | None, hotwords_file: Path | None
+) -> list[str]:
+    """Load ordered, de-duplicated ASR hint phrases.
+
+    Files use one term/phrase per line; blank lines and lines beginning with '#'
+    are ignored.  The exact resulting list is stored in transcript provenance.
+    """
+    values: list[str] = []
+    values.extend(inline or [])
+    if hotwords_file is not None:
+        text = hotwords_file.read_text(encoding="utf-8-sig")
+        values.extend(
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        value = value.strip()
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(value)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # audio extraction
 # --------------------------------------------------------------------------- #
@@ -130,7 +163,19 @@ def _pick_compute_type(device: str, requested: str) -> str:
 def _resolve_device(requested: str) -> str:
     if requested != "auto":
         return requested
-    try:  # prefer GPU when torch reports CUDA, else CPU
+
+    # faster-whisper executes through CTranslate2, not PyTorch.  Prefer the
+    # runtime that will actually load the model when asking whether CUDA is
+    # usable.  Keep the torch probe only as a compatibility fallback for
+    # environments where CTranslate2 is not importable yet.
+    try:
+        import ctranslate2  # type: ignore
+
+        return "cuda" if int(ctranslate2.get_cuda_device_count()) > 0 else "cpu"
+    except Exception:
+        pass
+
+    try:
         import torch  # type: ignore
 
         return "cuda" if torch.cuda.is_available() else "cpu"
@@ -138,7 +183,10 @@ def _resolve_device(requested: str) -> str:
         return "cpu"
 
 
-def load_model(model_name: str, device: str, compute_type: str) -> Any:
+def load_model(
+    model_name: str, device: str, compute_type: str
+) -> tuple[Any, str, str]:
+    """Load a Whisper model and report the runtime that actually succeeded."""
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -146,10 +194,14 @@ def load_model(model_name: str, device: str, compute_type: str) -> Any:
             "faster-whisper is not installed. Run: pip install faster-whisper"
         ) from exc
     try:
-        return WhisperModel(model_name, device=device, compute_type=compute_type)
+        model = WhisperModel(
+            model_name, device=device, compute_type=compute_type
+        )
+        return model, device, compute_type
     except Exception:
         if device == "cuda":  # graceful CPU fallback (missing cuDNN/cuBLAS etc.)
-            return WhisperModel(model_name, device="cpu", compute_type="int8")
+            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            return model, "cpu", "int8"
         raise
 
 
@@ -165,17 +217,23 @@ def transcribe_media(
     vad_filter: bool,
     ffmpeg: str,
     requested_input: str,
+    hotwords: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Transcribe one media file into the stable transcript document schema."""
     faster_whisper_version = _dependency_version("faster_whisper")
     with tempfile.TemporaryDirectory(prefix="lmt_") as tmp:
         wav_path = Path(tmp) / "audio.wav"
         extract_audio(media, wav_path, ffmpeg)
+        transcribe_kwargs: dict[str, Any] = {
+            "language": language,
+            "beam_size": beam_size,
+            "vad_filter": vad_filter,
+        }
+        if hotwords:
+            transcribe_kwargs["hotwords"] = ", ".join(hotwords)
         segments_iter, info = model.transcribe(
             str(wav_path),
-            language=language,
-            beam_size=beam_size,
-            vad_filter=vad_filter,
+            **transcribe_kwargs,
         )
         segments = [
             {
@@ -207,6 +265,7 @@ def transcribe_media(
             "compute_type": compute_type,
             "beam_size": beam_size,
             "vad_filter": vad_filter,
+            "hotwords": list(hotwords),
         },
         "transcript": {
             "language": language_code,
@@ -308,10 +367,50 @@ def render_batch(documents: Sequence[dict[str, Any]], output_format: str) -> str
     raise ValueError(f"unsupported output format: {output_format}")
 
 
-def _write_text(path: Path, content: str) -> None:
+def _write_text(path: Path, content: str, *, overwrite: bool = False) -> None:
+    content.encode("utf-8")  # Validate before creating or replacing any file.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as output_file:
-        output_file.write(content)
+    if not overwrite:
+        with path.open("x", encoding="utf-8", newline="\n") as output_file:
+            output_file.write(content)
+        return
+    # Replace the directory entry atomically; never truncate through a symlink.
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as output_file:
+            temporary = output_file.name
+            output_file.write(content)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+
+
+def plan_outputs(media_files: Sequence[Path], output_dir: Path,
+                 output_format: str, *, overwrite: bool = False,
+                 protected: Sequence[Path] = ()) -> dict[Path, Path]:
+    """Reject ambiguous or destructive destinations before any transcription."""
+    outputs: dict[Path, Path] = {}
+    seen: set[Path] = set()
+    sources = [*media_files, *protected]
+    for media in media_files:
+        path = output_dir / f"{media.stem}{FORMAT_EXTENSIONS[output_format]}"
+        resolved = path.resolve()
+        if resolved in seen:
+            raise ValueError(f"multiple inputs map to the same output: {path}")
+        seen.add(resolved)
+        for source in sources:
+            if resolved == source.resolve() or (
+                path.exists() and source.exists() and path.samefile(source)
+            ):
+                raise ValueError(f"output aliases an input: {path}")
+        if path.is_dir() or (path.exists() and not overwrite) or path.is_symlink():
+            raise ValueError(f"output exists; choose a new directory or --overwrite: {path}")
+        outputs[media] = path
+    return outputs
 
 
 # --------------------------------------------------------------------------- #
@@ -332,6 +431,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="write one <stem>.<extension> file per input")
     parser.add_argument("--stdout", action="store_true", dest="to_stdout",
                         help="write a single batch document to standard output")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="replace existing transcript files (default: fail safely)")
     parser.add_argument("--model", default="small",
                         help="whisper model: tiny|base|small|medium|large-v3 (default: small)")
     parser.add_argument("--device", default="auto", choices=("auto", "cuda", "cpu"),
@@ -343,6 +444,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beam-size", type=int, default=5, help="beam size (default: 5)")
     parser.add_argument("--vad-filter", action="store_true",
                         help="apply voice-activity detection to drop silence")
+    parser.add_argument(
+        "--hotword",
+        action="append",
+        dest="hotwords",
+        metavar="TERM",
+        help="bias recognition toward a technical term/phrase; repeatable",
+    )
+    parser.add_argument(
+        "--hotwords-file",
+        type=Path,
+        help="UTF-8 file with one hotword/hint phrase per line",
+    )
     parser.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg executable (default: ffmpeg)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -358,33 +471,82 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
         print("error: at least one output destination is required: --output-dir or --stdout", file=stderr)
         return EXIT_USAGE
 
+    if args.beam_size < 1:
+        print("error: --beam-size must be positive", file=stderr)
+        return EXIT_USAGE
+
+    try:
+        hotwords = load_hotwords(args.hotwords, args.hotwords_file)
+    except (OSError, UnicodeError) as exc:
+        print(
+            f"error: could not read hotwords file: {type(exc).__name__}: {exc}",
+            file=stderr,
+        )
+        return EXIT_USAGE
+
     if shutil.which(args.ffmpeg) is None and not Path(args.ffmpeg).is_file():
         print(f"error: ffmpeg not found ('{args.ffmpeg}'). Install ffmpeg or pass --ffmpeg PATH.", file=stderr)
         return EXIT_DEPENDENCY
 
-    media_files = resolve_inputs(args.media)
+    try:
+        media_files = resolve_inputs(args.media)
+    except (OSError, ValueError) as exc:
+        print(f"error: could not resolve media inputs: {exc}", file=stderr)
+        return EXIT_USAGE
     if not media_files:
         print("error: no supported media files matched the given inputs", file=stderr)
         return EXIT_USAGE
 
-    device = _resolve_device(args.device)
-    compute_type = _pick_compute_type(device, args.compute_type)
     try:
-        model = load_model(args.model, device, compute_type)
+        outputs = plan_outputs(
+            media_files, args.output_dir.expanduser(), args.format,
+            overwrite=args.overwrite,
+            protected=[args.hotwords_file] if args.hotwords_file else (),
+        ) if args.output_dir is not None else {}
+    except (OSError, ValueError) as exc:
+        print(f"error: unsafe output: {exc}", file=stderr)
+        return EXIT_USAGE
+
+    requested_device = _resolve_device(args.device)
+    requested_compute_type = _pick_compute_type(
+        requested_device, args.compute_type
+    )
+    try:
+        loaded = load_model(
+            args.model, requested_device, requested_compute_type
+        )
     except ModuleNotFoundError as exc:
         print(f"error: {exc}", file=stderr)
         return EXIT_DEPENDENCY
+    except Exception as exc:
+        print(f"error: model loading failed: {type(exc).__name__}: {exc}", file=stderr)
+        return EXIT_RUNTIME
+
+    # The tuple is the current contract.  Accept a bare model as a compatibility
+    # path for injected test doubles and older external callers.
+    if isinstance(loaded, tuple) and len(loaded) == 3:
+        model, runtime_device, runtime_compute_type = loaded
+    else:
+        model = loaded
+        runtime_device = requested_device
+        runtime_compute_type = requested_compute_type
 
     documents: list[dict[str, Any]] = []
     exit_code = EXIT_OK
     for media in media_files:
-        print(f"transcribing {media.name} ({args.model}/{device}) ...", file=stderr)
+        print(
+            f"transcribing {media.name} "
+            f"({args.model}/{runtime_device}/{runtime_compute_type}) ...",
+            file=stderr,
+        )
         try:
             document = transcribe_media(
-                media, model=model, model_name=args.model, device=device,
-                compute_type=compute_type, language=args.language,
+                media, model=model, model_name=args.model,
+                device=runtime_device, compute_type=runtime_compute_type,
+                language=args.language,
                 beam_size=args.beam_size, vad_filter=args.vad_filter,
                 ffmpeg=args.ffmpeg, requested_input=str(media),
+                hotwords=hotwords,
             )
         except Exception as exc:  # keep going through the batch
             print(f"  failed: {type(exc).__name__}: {exc}", file=stderr)
@@ -392,12 +554,22 @@ def run_cli(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None,
             continue
         documents.append(document)
         if args.output_dir is not None:
-            out_path = args.output_dir / f"{media.stem}{FORMAT_EXTENSIONS[args.format]}"
-            _write_text(out_path, render_document(document, args.format))
+            out_path = outputs[media]
+            try:
+                _write_text(out_path, render_document(document, args.format),
+                            overwrite=args.overwrite)
+            except (OSError, UnicodeError) as exc:
+                print(f"  output failed: {type(exc).__name__}: {exc}", file=stderr)
+                exit_code = EXIT_RUNTIME
+                continue
             print(f"  wrote {out_path} ({document['transcript']['segment_count']} segments)", file=stderr)
 
     if args.to_stdout and documents:
-        stdout.write(render_batch(documents, args.format))
+        try:
+            stdout.write(render_batch(documents, args.format))
+        except (OSError, UnicodeError) as exc:
+            print(f"error: stdout failed: {type(exc).__name__}: {exc}", file=stderr)
+            exit_code = EXIT_RUNTIME
 
     return exit_code
 

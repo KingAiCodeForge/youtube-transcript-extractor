@@ -1,11 +1,5 @@
-#!/bin/bash
-
-# This script installs the necessary dependencies for the YouTube Transcript Extractor project.
-
-# Ensure pip is up-to-date
-python -m pip install --upgrade pip
-
-# Install required packages
-pip install -r requirements.txt
-
-echo "Installation complete. You can now run the YouTube Transcript Extractor."
+#!/bin/sh
+set -eu
+# Resolve the checkout independently of the caller's current directory.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+"${PYTHON:-python3}" -m pip install "$script_dir" "$@"

@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence, TextIO
 from urllib.parse import parse_qs, urlparse
 
 
-__version__ = "1.0.0"
+__version__ = "1.1.0rc1"
 SCHEMA_VERSION = "1.0"
 GENERATOR_NAME = "youtube-transcript-extractor"
 
@@ -284,14 +286,28 @@ def _write_error(
         {key: value for key, value in context.items() if value is not None}
     )
     stream.write(
-        json.dumps({"error": error}, ensure_ascii=False, sort_keys=True) + "\n"
+        json.dumps({"error": error}, ensure_ascii=True, sort_keys=True) + "\n"
     )
 
 
 def _write_text(path: Path, content: str, *, overwrite: bool = False) -> None:
-    mode = "w" if overwrite else "x"
-    with path.open(mode, encoding="utf-8", newline="\n") as output_file:
-        output_file.write(content)
+    content.encode("utf-8")  # Validate before creating or replacing any file.
+    if not overwrite:
+        with path.open("x", encoding="utf-8", newline="\n") as output_file:
+            output_file.write(content)
+        return
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as output_file:
+            temporary = output_file.name
+            output_file.write(content)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -391,8 +407,7 @@ def run_cli(
     if output_dir is not None:
         output_dir = output_dir.expanduser()
         try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            if not output_dir.is_dir():
+            if output_dir.exists() and not output_dir.is_dir():
                 raise NotADirectoryError(str(output_dir))
         except OSError as exc:
             _write_error(
@@ -459,6 +474,12 @@ def run_cli(
 
     output_failed = False
     if output_dir is not None:
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            _write_error(stderr, "output_failed", str(exc), path=str(output_dir),
+                         exception_type=type(exc).__name__)
+            return EXIT_OUTPUT
         extension = FORMAT_EXTENSIONS[args.format]
         for document in documents:
             video_id = document["source"]["video_id"]
@@ -478,7 +499,7 @@ def run_cli(
                     path=str(output_path),
                     video_id=video_id,
                 )
-            except OSError as exc:
+            except (OSError, UnicodeError) as exc:
                 output_failed = True
                 _write_error(
                     stderr,
@@ -492,7 +513,7 @@ def run_cli(
     if args.to_stdout:
         try:
             stdout.write(render_batch(documents, args.format))
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             output_failed = True
             _write_error(
                 stderr,

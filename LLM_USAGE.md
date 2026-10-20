@@ -64,7 +64,16 @@ Transcribes local files that have no captions. Requires `faster-whisper` (`pip i
 ```bash
 local-media-transcribe ./recordings --format json --output-dir ./out
 local-media-transcribe call.m4a --stdout --format text
+local-media-transcribe webinar.mp4 \
+  --hotwords-file vocab/ecu_tuning_core.txt \
+  --format json --output-dir ./out
 ```
+
+For technical media, repeat `--hotword TERM` or pass a UTF-8
+`--hotwords-file` with one term/phrase per line. The ordered de-duplicated
+hotword list is recorded in `extraction.hotwords`; downstream agents should
+therefore treat it as decoding provenance, not as independent evidence that the
+hinted term was actually spoken.
 
 At least one destination is required: `--stdout`, `--output-dir`, or both. Inputs may be files, directories (searched recursively) or globs, including absolute globs. Unsupported extensions are ignored and duplicate inputs are transcribed once.
 
@@ -81,9 +90,15 @@ Progress lines go to stderr and never contaminate stdout, so `--stdout` output i
 
 A batch continues after an individual failure. Code 3 therefore means partial success, and the files that succeeded are on disk.
 
+Output defaults to exclusive creation. Use `--overwrite` deliberately; same-stem
+collisions and aliases of media/hotword inputs are rejected even with that flag.
+Unsafe output preflight returns code 1; write and model-loading failures return
+code 3. A positive `--beam-size` is required. JSON batch output is an array,
+whereas `youtube-transcript` uses a `videos` envelope.
+
 ### Provenance fields
 
-Alongside the shared schema, `source.file_sha256` records the SHA-256 of the input file and the `extraction` block records `model`, `device`, `compute_type`, `beam_size`, `vad_filter` and the resolved `library_version`. A transcript can be tied back to the exact file and settings that produced it, and an unchanged input re-runs to a byte-identical document.
+Alongside the shared fields, `source.file_sha256` records the SHA-256 of the input file and the `extraction` block records `model`, `device`, `compute_type`, `beam_size`, `vad_filter` and the resolved `library_version`. Identical segments and provenance render byte-identically; ASR output itself can vary by model, runtime and hardware.
 
 ## Both commands
 
