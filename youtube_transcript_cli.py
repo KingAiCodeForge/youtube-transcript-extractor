@@ -286,11 +286,12 @@ def _write_error(
         {key: value for key, value in context.items() if value is not None}
     )
     stream.write(
-        json.dumps({"error": error}, ensure_ascii=False, sort_keys=True) + "\n"
+        json.dumps({"error": error}, ensure_ascii=True, sort_keys=True) + "\n"
     )
 
 
 def _write_text(path: Path, content: str, *, overwrite: bool = False) -> None:
+    content.encode("utf-8")  # Validate before creating or replacing any file.
     if not overwrite:
         with path.open("x", encoding="utf-8", newline="\n") as output_file:
             output_file.write(content)
@@ -498,7 +499,7 @@ def run_cli(
                     path=str(output_path),
                     video_id=video_id,
                 )
-            except OSError as exc:
+            except (OSError, UnicodeError) as exc:
                 output_failed = True
                 _write_error(
                     stderr,
@@ -512,7 +513,7 @@ def run_cli(
     if args.to_stdout:
         try:
             stdout.write(render_batch(documents, args.format))
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             output_failed = True
             _write_error(
                 stderr,

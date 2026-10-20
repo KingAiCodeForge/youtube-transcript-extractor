@@ -368,6 +368,7 @@ def render_batch(documents: Sequence[dict[str, Any]], output_format: str) -> str
 
 
 def _write_text(path: Path, content: str, *, overwrite: bool = False) -> None:
+    content.encode("utf-8")  # Validate before creating or replacing any file.
     path.parent.mkdir(parents=True, exist_ok=True)
     if not overwrite:
         with path.open("x", encoding="utf-8", newline="\n") as output_file:

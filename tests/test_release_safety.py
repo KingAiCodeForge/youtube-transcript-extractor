@@ -1,5 +1,5 @@
 """Safety boundaries tested without network, ASR models or GPU access."""
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -137,3 +137,45 @@ def test_local_stdout_failure_is_controlled(tmp_path, monkeypatch):
     errors = StringIO()
     assert lmt.run_cli([str(media), "--stdout"], stdout=BrokenOutput(), stderr=errors) == lmt.EXIT_RUNTIME
     assert "stdout failed" in errors.getvalue()
+
+
+@pytest.mark.parametrize("module", [lmt, yt])
+def test_malformed_unicode_does_not_create_an_output(module, tmp_path):
+    output = tmp_path / "invalid.txt"
+    with pytest.raises(UnicodeError):
+        module._write_text(output, "\ud800")
+    assert not output.exists()
+
+
+class MalformedCaptionApi:
+    def fetch(self, *args, **kwargs):
+        return [SimpleNamespace(text="\ud800", start=0, duration=1)]
+
+
+def test_youtube_unicode_file_failure_returns_output_error(tmp_path):
+    errors = StringIO()
+    assert yt.run_cli(["3OhT_nAgJ2I", "--output-dir", str(tmp_path)],
+                      api_factory=MalformedCaptionApi, stderr=errors) == yt.EXIT_OUTPUT
+    assert not (tmp_path / "3OhT_nAgJ2I.json").exists()
+    assert "output_failed" in errors.getvalue()
+
+
+def test_youtube_unicode_stdout_failure_returns_output_error():
+    errors = StringIO()
+    output = TextIOWrapper(BytesIO(), encoding="utf-8")
+    assert yt.run_cli(["3OhT_nAgJ2I", "--stdout"], api_factory=MalformedCaptionApi,
+                      stdout=output, stderr=errors) == yt.EXIT_OUTPUT
+    assert "output_failed" in errors.getvalue()
+
+
+def test_youtube_error_json_escapes_invalid_unicode():
+    data = BytesIO()
+    errors = TextIOWrapper(data, encoding="utf-8")
+
+    def unavailable():
+        raise RuntimeError("\ud800")
+
+    assert yt.run_cli(["3OhT_nAgJ2I", "--stdout"], api_factory=unavailable,
+                      stderr=errors) == yt.EXIT_EXTRACTION
+    errors.flush()
+    assert b"\\ud800" in data.getvalue()
